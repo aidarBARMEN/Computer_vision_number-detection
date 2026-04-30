@@ -1,6 +1,6 @@
 import torch
 from ultralytics import YOLO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance, ImageFilter
 import io
 import base64
 import os
@@ -156,11 +156,26 @@ class CVModelManager:
             model = self.models[model_name]
 
             # ---------------- Detection + OCR ----------------
+            stage_info = None
             if "yolo" in model_name.lower():
-                results = model(image, conf=0.25)[0]
-                boxes = []
+                # COCO YOLO finds vehicles, not plates → cascade to plate detector.
+                # Classes 2/3/5/7 = car/motorcycle/bus/truck.
+                results = model(image, conf=0.25, classes=[2, 3, 5, 7])[0]
+                vehicle_boxes = []
                 if results.boxes is not None and len(results.boxes) > 0:
-                    boxes = results.boxes.xyxy.cpu().numpy().tolist()
+                    vehicle_boxes = results.boxes.xyxy.cpu().numpy().tolist()
+
+                plate_detector = self.models.get("frcnn_v2.pt")
+                if plate_detector is None:
+                    return {"error": "Plate detector frcnn_v2.pt missing"}, original, original
+
+                if vehicle_boxes:
+                    boxes = self._cascade_plates(image, vehicle_boxes, plate_detector)
+                    stage_info = f"YOLO нашёл {len(vehicle_boxes)} ТС → FRCNN нашёл {len(boxes)} номер(ов)"
+                else:
+                    # YOLO found no vehicle → fall back to running FRCNN on full image.
+                    boxes = self._run_torchvision_boxes(image, plate_detector, thresh=0.6)
+                    stage_info = f"YOLO ничего не нашёл, fallback FRCNN: {len(boxes)} номер(ов)"
 
             elif model_name == "frcnn_v2.pt":
                 boxes = self._run_torchvision_boxes(image, model, thresh=0.6)
@@ -174,13 +189,16 @@ class CVModelManager:
             recognitions = self._recognize_boxes(image, boxes, ocr_engine)
             annotated = self._draw_results(image, boxes, recognitions, model_name)
 
-            return {
+            payload = {
                 "type": "detection_ocr",
                 "model": model_name,
                 "ocr_engine": ocr_engine,
                 "boxes": boxes,
                 "recognitions": recognitions,
-            }, original, self._to_base64(annotated)
+            }
+            if stage_info is not None:
+                payload["pipeline"] = stage_info
+            return payload, original, self._to_base64(annotated)
 
         except Exception as e:
             import traceback
@@ -210,21 +228,44 @@ class CVModelManager:
         boxes = boxes[keep_idx][:20]
         return boxes.cpu().numpy().tolist()
 
+    def _cascade_plates(self, image: Image.Image, vehicle_boxes, plate_detector, thresh=0.5):
+        """For each vehicle bbox, run plate detector and return plate boxes in image coords."""
+        all_plates = []
+        W, H = image.size
+        for vbox in vehicle_boxes:
+            x1, y1, x2, y2 = [int(round(v)) for v in vbox]
+            x1 = max(0, x1); y1 = max(0, y1)
+            x2 = min(W, x2); y2 = min(H, y2)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            crop = image.crop((x1, y1, x2, y2))
+            local_boxes = self._run_torchvision_boxes(crop, plate_detector, thresh=thresh)
+            for lb in local_boxes:
+                lx1, ly1, lx2, ly2 = lb
+                all_plates.append([lx1 + x1, ly1 + y1, lx2 + x1, ly2 + y1])
+        return all_plates
+
     def _recognize_boxes(self, image: Image.Image, boxes, ocr_engine: str):
         recognitions = []
         W, H = image.size
         for box in boxes:
             x1, y1, x2, y2 = [int(round(v)) for v in box]
-            x1 = max(0, min(x1, W - 1))
-            y1 = max(0, min(y1, H - 1))
-            x2 = max(x1 + 1, min(x2, W))
-            y2 = max(y1 + 1, min(y2, H))
-            crop = image.crop((x1, y1, x2, y2))
+            # Expand box by ~8% on each side to capture plate borders/letters cropped
+            # at the edge. CRNN/EasyOCR both benefit from a small margin.
+            bw, bh = x2 - x1, y2 - y1
+            pad_x = max(2, int(bw * 0.08))
+            pad_y = max(2, int(bh * 0.12))
+            ex1 = max(0, min(x1 - pad_x, W - 1))
+            ey1 = max(0, min(y1 - pad_y, H - 1))
+            ex2 = max(ex1 + 1, min(x2 + pad_x, W))
+            ey2 = max(ey1 + 1, min(y2 + pad_y, H))
+            crop = image.crop((ex1, ey1, ex2, ey2))
+            crop_proc = self._enhance_for_ocr(crop)
 
             entry = {"box": [x1, y1, x2, y2]}
             if ocr_engine in ("crnn", "both") and self.crnn is not None:
                 try:
-                    entry["crnn"] = self.crnn.recognize(crop)
+                    entry["crnn"] = self.crnn.recognize(crop_proc)
                 except Exception as e:
                     entry["crnn_error"] = str(e)
             if ocr_engine in ("easyocr", "both"):
@@ -234,6 +275,18 @@ class CVModelManager:
                     entry["easyocr_error"] = str(e)
             recognitions.append(entry)
         return recognitions
+
+    @staticmethod
+    def _enhance_for_ocr(crop: Image.Image) -> Image.Image:
+        """Upscale + autocontrast + sharpen for tiny plate crops."""
+        w, h = crop.size
+        if h < 48:
+            scale = 48 / max(h, 1)
+            crop = crop.resize((max(1, int(w * scale)), 48), Image.BICUBIC)
+        crop = ImageOps.autocontrast(crop, cutoff=2)
+        crop = ImageEnhance.Contrast(crop).enhance(1.4)
+        crop = crop.filter(ImageFilter.SHARPEN)
+        return crop
 
     def _draw_results(self, image: Image.Image, boxes, recognitions, model_name: str):
         annotated = image.copy()

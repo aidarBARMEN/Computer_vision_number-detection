@@ -127,14 +127,20 @@ class CRNNRecognizer:
         self.target_w = 100
 
     def _preprocess(self, pil_img: Image.Image) -> torch.Tensor:
+        from PIL import ImageOps, ImageEnhance, ImageFilter
         gray = pil_img.convert("L")
+        # Boost contrast & sharpen — tiny plate crops are usually low-contrast.
+        gray = ImageOps.autocontrast(gray, cutoff=2)
+        gray = ImageEnhance.Contrast(gray).enhance(1.3)
+        gray = gray.filter(ImageFilter.SHARPEN)
         w, h = gray.size
         if h == 0 or w == 0:
             gray = Image.new("L", (self.target_w, self.target_h), color=0)
         else:
             new_w = max(1, int(w * (self.target_h / h)))
-            new_w = min(max(new_w, 32), 400)
-            gray = gray.resize((new_w, self.target_h), Image.BILINEAR)
+            # Wider window — Russian plates are long; clamp to reasonable bounds.
+            new_w = min(max(new_w, 64), 512)
+            gray = gray.resize((new_w, self.target_h), Image.BICUBIC)
         arr = np.asarray(gray, dtype=np.float32) / 255.0
         arr = (arr - 0.5) / 0.5
         tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
@@ -147,6 +153,9 @@ class CRNNRecognizer:
         logits = logits.squeeze(1).cpu()  # (T, num_classes)
         text = _ctc_greedy_decode(logits)
         return text.upper()
+
+
+PLATE_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 
 class EasyOCRRecognizer:
@@ -166,10 +175,28 @@ class EasyOCRRecognizer:
     def recognize(self, pil_img: Image.Image) -> str:
         reader = self._ensure()
         arr = np.array(pil_img.convert("RGB"))
-        results = reader.readtext(arr, detail=1, paragraph=False)
+        # Restrict alphabet to plate-friendly chars and concatenate all detected
+        # fragments (helps when EasyOCR splits a plate into 2-3 pieces).
+        results = reader.readtext(
+            arr,
+            detail=1,
+            paragraph=False,
+            allowlist=PLATE_ALLOWLIST,
+            text_threshold=0.4,
+            low_text=0.3,
+        )
         if not results:
             return ""
-        # Pick the highest-confidence result; strip non-alphanumerics.
-        best = max(results, key=lambda r: r[2])
-        text = "".join(ch for ch in best[1] if ch.isalnum())
-        return text.upper()
+        # Sort left-to-right by bbox x, drop fragments shorter than 2 chars.
+        fragments = []
+        for bbox, txt, conf in results:
+            cleaned = "".join(ch for ch in txt.upper() if ch.isalnum())
+            if len(cleaned) < 2 or conf < 0.2:
+                continue
+            x = min(p[0] for p in bbox)
+            fragments.append((x, cleaned, conf))
+        if not fragments:
+            best = max(results, key=lambda r: r[2])
+            return "".join(c for c in best[1].upper() if c.isalnum())
+        fragments.sort(key=lambda t: t[0])
+        return "".join(f[1] for f in fragments)
