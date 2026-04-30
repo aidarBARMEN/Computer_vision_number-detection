@@ -1,104 +1,155 @@
-```markdown
-# 🖼️ CV FastAPI — Computer Vision Service
+# 🚗 License Plate Recognition — CV FastAPI
 
-**Modern FastAPI backend** for running 5 computer vision models.
+**FastAPI** computer-vision service for **car license plate detection + OCR**.
 
-**Supported tasks:**
-* **Object Detection**
-* **OCR / Text Recognition** (including license plates)
+Combines **5 detection / OCR models** into one cascaded pipeline:
+**YOLO → Faster R-CNN → CRNN / EasyOCR**.
 
 ---
 
 ## ✨ Features
 
-* **5 models** in one unified interface:
-    * YOLOv8n
-    * YOLO26n
-    * Faster R-CNN v2 (MobileNetV3)
-    * SSD v2
-    * CRNN (OCR)
-* Clean and responsive web UI (Bootstrap + JavaScript)
-* Upload image → select model → get result (annotated image + JSON)
-* Supports all common image formats
-* Fast inference on CPU (GPU supported if available)
+* Cascaded detection pipeline:
+  1. **YOLOv8n / YOLO26n** — find vehicles (cars / trucks / buses / motorcycles, COCO classes 2/3/5/7)
+  2. **Faster R-CNN v2** — find license plates *inside* each vehicle crop
+  3. **CRNN (custom)** + **EasyOCR (baseline)** — read plate text
+* Automatic fallback: if YOLO finds no vehicles → FRCNN runs on the full image
+* Two OCR engines side-by-side: own solution (CRNN + CTC) vs library baseline (EasyOCR with plate allowlist)
+* OCR enhancement: box expansion (+8 % / +12 %), autocontrast, sharpening, upscaling for tiny crops
+* Modern web UI (Bootstrap 5 + JetBrains Mono) with yellow license-plate banner and copy-JSON
+* Runs on CPU, auto-uses GPU if available
 
-**Fully working models:**
-* YOLOv8n
-* YOLO26n
-* Faster R-CNN v2
+### Model status
+
+| Model            | Role                       | Status              |
+| :--------------- | :------------------------- | :------------------ |
+| `yolov8n.pt`     | Vehicle detector           | ✅ Working           |
+| `yolo26n.pt`     | Vehicle detector           | ✅ Working           |
+| `frcnn_v2.pt`    | Plate detector             | ✅ Working           |
+| `ssd_v2.pt`      | Plate detector (alt.)      | ⚠️ State-dict loads |
+| `crnn.pt`        | Custom OCR (CNN+BiLSTM+CTC)| ✅ Working           |
+| `easyocr`        | OCR baseline (library)     | ✅ Working           |
 
 ---
 
 ## 🚀 How to Run
 
 ### 1. Go to project folder
+
 ```bash
-cd CvFastApi
+cd Computer_vision_number-detection
 ```
 
 ### 2. Install dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 3. Place model files
-Put all 5 model files in the `models/` folder:
-- `crnn.pt`
-- `frcnn_v2.pt`
-- `ssd_v2.pt`
-- `yolo26n.pt`
-- `yolov8n.pt`
+
+Put all 5 weight files in the `models/` folder:
+
+```
+models/
+├── crnn.pt
+├── frcnn_v2.pt
+├── ssd_v2.pt
+├── yolo26n.pt
+└── yolov8n.pt
+```
 
 ### 4. Start the server
+
 ```bash
 python main.py
 ```
 
-Open your browser and go to: **http://127.0.0.1:8000**
+Open in browser: **http://127.0.0.1:8000**
 
 ---
 
-## Project Structure
+## 🗂 Project Structure
 
 ```text
-CvFastApi/
-├── models/             # ← put all .pt files here
+Computer_vision_number-detection/
+├── models/             # all .pt weight files
 ├── templates/
-│   └── index.html      # web interface
-├── main.py             # FastAPI application
-├── inference.py        # model loading and inference
+│   └── index.html      # web UI (Bootstrap + custom plate theme)
+├── main.py             # FastAPI app — / and /predict endpoints
+├── inference.py        # CVModelManager — model loading + cascade pipeline
+├── ocr.py              # CRNNRecognizer + EasyOCRRecognizer
+├── generate_report.py  # builds Project_Report.docx
 ├── requirements.txt
-├── Dockerfile          # (optional)
 └── README.md
 ```
 
 ---
 
-## How to Use
+## 🧠 How the cascade pipeline works
+
+When you pick a **YOLO** detector in the UI:
+
+1. YOLO runs on the full image, filtered to vehicle classes only (COCO 2/3/5/7).
+2. For each vehicle bbox, the image is cropped and **Faster R-CNN v2** runs on the crop to find license plates.
+3. Plate boxes are mapped back into the original image coordinate space.
+4. Each plate crop is expanded (~8 % / 12 %), enhanced (autocontrast + sharpen), and passed to the chosen OCR engine.
+5. If YOLO finds no vehicles, FRCNN automatically runs on the **full image** as a fallback.
+
+When you pick **Faster R-CNN v2** or **SSDLite v2** directly — they run plate detection on the full image without the YOLO stage.
+
+When you pick **CRNN** or **EasyOCR** as the model — only OCR is performed (the whole image is treated as a single plate crop).
+
+---
+
+## 🖥 How to Use
 
 1. Open **http://127.0.0.1:8000**
-2. Choose a model from the dropdown
-3. Upload an image (jpg, png, etc.)
-4. Click **"🚀 Run Inference"**
-5. You will receive:
-   - Original image
-   - Annotated result image (with bounding boxes or text)
-   - JSON result with predictions
+2. Pick a **detector** (YOLOv8n / YOLO26n / FRCNN / SSD / CRNN-only / EasyOCR-only)
+3. Pick an **OCR engine** (`both` / `crnn` / `easyocr`)
+4. Upload an image (JPG / PNG)
+5. Click **🚀 Распознать номер**
+6. You get back:
+   * **Yellow plate banner** with the recognized number (CRNN + EasyOCR side-by-side when both selected)
+   * **Original** and **annotated** images side-by-side
+   * Full **JSON** response from `/predict` (with copy-to-clipboard button)
 
 ---
 
-## Current Model Status
+## 📡 API
 
-| Model | Status | Notes |
-| :--- | :--- | :--- |
-| `yolov8n.pt` | ✅ Fully working | Object Detection |
-| `yolo26n.pt` | ✅ Fully working | Object Detection |
-| `frcnn_v2.pt` | ✅ Fully working | Object Detection |
-| `ssd_v2.pt` | ⚠️ State_dict only | Full inference coming later |
-| `crnn.pt` | ⚠️ State_dict only | Full OCR coming later |
+### `POST /predict`
 
----
+Form fields:
 
-**Project:** CV FastAPI  
-**Date:** April 30, 2026
+| Field         | Type   | Required | Notes                                                          |
+| :------------ | :----- | :------- | :------------------------------------------------------------- |
+| `file`        | file   | yes      | Image (JPG / PNG / WebP)                                       |
+| `model_name`  | string | yes      | `yolov8n.pt` / `yolo26n.pt` / `frcnn_v2.pt` / `ssd_v2.pt` / `crnn.pt` / `easyocr` |
+| `ocr_engine`  | string | no       | `both` (default) / `crnn` / `easyocr`                          |
+
+Response (detection + OCR):
+
+```json
+{
+  "prediction": {
+    "type": "detection_ocr",
+    "model": "yolov8n.pt",
+    "ocr_engine": "both",
+    "pipeline": "YOLO нашёл 1 ТС → FRCNN нашёл 1 номер(ов)",
+    "boxes": [[412, 287, 698, 361]],
+    "recognitions": [
+      {"box": [412, 287, 698, 361], "crnn": "A123BC77", "easyocr": "A123BC77"}
+    ]
+  },
+  "original_image": "data:image/jpeg;base64,...",
+  "annotated_image": "data:image/jpeg;base64,...",
+  "model_used": "yolov8n.pt",
+  "ocr_engine": "both"
+}
 ```
+
+---
+
+**Project:** CV FastAPI — License Plate Recognition
+**Date:** April 30, 2026
