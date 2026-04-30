@@ -1,35 +1,31 @@
-**✅ Вот готовый файл `README.md`**
-
-Скопируй **весь текст ниже** и сохрани его в папке проекта как файл `README.md`:
-
 ```markdown
 # 🖼️ CV FastAPI — Computer Vision Service
 
 **Modern FastAPI backend** for running 5 computer vision models.
 
 **Supported tasks:**
-- **Object Detection**
-- **OCR / Text Recognition** (including license plates)
+* **Object Detection**
+* **OCR / Text Recognition** (including license plates)
 
 ---
 
 ## ✨ Features
 
-- **5 models** in one unified interface:
-  - YOLOv8n
-  - YOLO26n
-  - Faster R-CNN v2 (MobileNetV3)
-  - SSD v2
-  - CRNN (OCR)
-- Clean and responsive web UI (Bootstrap + JavaScript)
-- Upload image → select model → get result (annotated image + JSON)
-- Supports all common image formats
-- Fast inference on CPU (GPU supported if available)
+* **5 models** in one unified interface:
+    * YOLOv8n
+    * YOLO26n
+    * Faster R-CNN v2 (MobileNetV3)
+    * SSD v2
+    * CRNN (OCR)
+* Clean and responsive web UI (Bootstrap + JavaScript)
+* Upload image → select model → get result (annotated image + JSON)
+* Supports all common image formats
+* Fast inference on CPU (GPU supported if available)
 
 **Fully working models:**
-- YOLOv8n
-- YOLO26n
-- Faster R-CNN v2
+* YOLOv8n
+* YOLO26n
+* Faster R-CNN v2
 
 ---
 
@@ -64,15 +60,15 @@ Open your browser and go to: **http://127.0.0.1:8000**
 
 ## Project Structure
 
-```
+```text
 CvFastApi/
-├── models/                  # ← put all .pt files here
+├── models/             # ← put all .pt files here
 ├── templates/
-│   └── index.html           # web interface
-├── main.py                  # FastAPI application
-├── inference.py             # model loading and inference
+│   └── index.html      # web interface
+├── main.py             # FastAPI application
+├── inference.py        # model loading and inference
 ├── requirements.txt
-├── Dockerfile               # (optional)
+├── Dockerfile          # (optional)
 └── README.md
 ```
 
@@ -93,21 +89,16 @@ CvFastApi/
 
 ## Current Model Status
 
-| Model           | Status                  | Notes                          |
-|-----------------|-------------------------|--------------------------------|
-| yolov8n.pt      | ✅ Fully working        | Object Detection               |
-| yolo26n.pt      | ✅ Fully working        | Object Detection               |
-| frcnn_v2.pt     | ✅ Fully working        | Object Detection               |
-| ssd_v2.pt       | ⚠️ State_dict only      | Full inference coming later    |
-| crnn.pt         | ⚠️ State_dict only      | Full OCR coming later          |
+| Model | Status | Notes |
+| :--- | :--- | :--- |
+| `yolov8n.pt` | ✅ Fully working | Object Detection |
+| `yolo26n.pt` | ✅ Fully working | Object Detection |
+| `frcnn_v2.pt` | ✅ Fully working | Object Detection |
+| `ssd_v2.pt` | ⚠️ State_dict only | Full inference coming later |
+| `crnn.pt` | ⚠️ State_dict only | Full OCR coming later |
 
 ---
 
 **Project:** CV FastAPI  
 **Date:** April 30, 2026
 ```
-
-Готово!  
-Просто создай новый файл `README.md` и вставь туда весь текст сверху.  
-
-Хочешь, я добавлю в него Docker-инструкции или сделаю версию покороче?
