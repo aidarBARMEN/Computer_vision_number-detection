@@ -103,15 +103,15 @@ def _build_crnn_matching_state_dict(state_dict, device):
 
 
 def _ctc_greedy_decode(logits: torch.Tensor, alphabet: str = CRNN_ALPHABET) -> str:
-    """logits: (T, num_classes). Class 0 is the CTC blank."""
+    """logits: (T, num_classes). Last class index is the CTC blank."""
+    blank = len(alphabet)  # 36 for a 37-class model
     pred = logits.argmax(dim=-1).tolist()
     out = []
     prev = -1
     for p in pred:
-        if p != prev and p != 0:
-            idx = p - 1
-            if 0 <= idx < len(alphabet):
-                out.append(alphabet[idx])
+        if p != prev and p != blank:
+            if 0 <= p < len(alphabet):
+                out.append(alphabet[p])
         prev = p
     return "".join(out)
 
